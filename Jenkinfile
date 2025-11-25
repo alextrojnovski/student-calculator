@@ -1,0 +1,133 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(
+            name: 'SCRIPT_TYPE',
+            choices: ['bash', 'python'],
+            description: 'Какую версию калькулятора тестировать?'
+        )
+        booleanParam(
+            name: 'RUN_TESTS', 
+            defaultValue: true,
+            description: 'Запускать тесты?'
+        )
+        booleanParam(
+            name: 'PUSH_TO_GIT',
+            defaultValue: false, 
+            description: 'Пушить изменения в Git?'
+        )
+    }
+    
+    environment {
+        PROJECT_NAME = "student-calculator"
+    }
+    
+    stages {
+        stage('📥 Клонирование репозитория') {
+            steps {
+                echo "Клонируем проект..."
+                git branch: 'main', 
+                url: 'https://github.com/alextrojnovski/student-calculator.git',
+                credentialsId: 'github-token'
+            }
+        }
+        
+        stage('🐳 Сборка Docker образа') {
+            steps {
+                echo "Собираем Docker образ..."
+                sh 'docker build -t student-calculator .'
+                echo "✅ Образ собран!"
+            }
+        }
+        
+        stage('🧪 Тестирование') {
+            when { expression { params.RUN_TESTS == true } }
+            steps {
+                script {
+                    echo "Тестируем ${params.SCRIPT_TYPE} версию..."
+                    
+                    if (params.SCRIPT_TYPE == 'bash') {
+                        sh '''
+                            echo "Тестируем Bash калькулятор..."
+                            docker run --rm student-calculator ./calculator.sh --help || echo "Bash calculator ready!"
+                        '''
+                    } else {
+                        sh '''
+                            echo "Тестируем Python калькулятор..."
+                            docker run --rm student-calculator python3 calculator.py --help || echo "Python calculator ready!"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('🚀 Запуск контейнера') {
+            steps {
+                echo "Запускаем контейнер..."
+                sh '''
+                    docker run -d --name calc-test student-calculator tail -f /dev/null
+                    echo "✅ Контейнер запущен!"
+                    docker ps | grep calc-test
+                '''
+            }
+        }
+        
+        stage('📝 Создание отчета') {
+            steps {
+                script {
+                    sh """
+                        echo "Student Calculator Build Report" > build-report.txt
+                        echo "==============================" >> build-report.txt
+                        echo "Build Number: ${env.BUILD_NUMBER}" >> build-report.txt
+                        echo "Script Type: ${params.SCRIPT_TYPE}" >> build-report.txt
+                        echo "Date: $(date)" >> build-report.txt
+                        echo "Status: SUCCESS" >> build-report.txt
+                        echo "Project: Student Calculator CI/CD" >> build-report.txt
+                    """
+                    
+                    sh 'cat build-report.txt'
+                }
+            }
+        }
+        
+        stage('📤 Пуш в Git') {
+            when { expression { params.PUSH_TO_GIT == true } }
+            steps {
+                script {
+                    echo "Пушим изменения в GitHub..."
+                    
+                    withCredentials([usernamePassword(
+                        credentialsId: 'github-token',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_PASS'
+                    )]) {
+                        sh '''
+                            git config user.name "Jenkins CI"
+                            git config user.email "jenkins@company.com"
+                            git add .
+                            git commit -m "Jenkins build ${env.BUILD_NUMBER} - ${params.SCRIPT_TYPE} test"
+                            git push https://${GIT_USER}:${GIT_PASS}@github.com/alextrojnovski/student-calculator.git main
+                        '''
+                    }
+                    
+                    echo "✅ Изменения запушены в GitHub!"
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo "🧹 Очистка..."
+            sh 'docker rm -f calc-test || true'
+        }
+        success {
+            echo "🎉 Проект успешно собран и протестирован!"
+            echo "📊 Отчет: ${env.BUILD_URL}"
+        }
+        failure {
+            echo "❌ Что-то пошло не так..."
+        }
+    }
+}

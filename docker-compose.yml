@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  student-calculator:
+    build: .
+    container_name: student-calculator
+    volumes:
+      - .:/app
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    command: ["/bin/bash"]
+    
+  # Можно добавить Jenkins для полного цикла
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    container_name: jenkins-cicd
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
+
+volumes:
+  jenkins_data:
